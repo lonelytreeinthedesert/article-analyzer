@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { text } = req.body;
+  const { text, analyzeBias } = req.body;
 
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'No text provided' });
@@ -27,6 +27,12 @@ export default async function handler(req, res) {
     // Calculate word count immediately - this always works
     const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
     const readingTime = Math.max(1, Math.ceil(wordCount / 200));
+
+    // Perform bias detection if requested
+    let biasAnalysis = null;
+    if (analyzeBias) {
+      biasAnalysis = detectSubjectiveIntensifiers(text);
+    }
 
     // Use Claude to: 1) Create summary, 2) Search for source metadata
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -106,7 +112,7 @@ Return ONLY the JSON object.`
     }
 
     // Return metadata with guaranteed word count and reading time
-    res.status(200).json({
+    const responseData = {
       wordCount,
       readingTime: `${readingTime} minute${readingTime !== 1 ? 's' : ''}`,
       summary: metadata.summary || 'Summary not available',
@@ -115,7 +121,14 @@ Return ONLY the JSON object.`
       datePublished: metadata.datePublished || 'Unable to locate',
       source: metadata.source || 'Unable to locate',
       url: metadata.url || 'Unable to locate'
-    });
+    };
+
+    // Add bias analysis if requested
+    if (biasAnalysis) {
+      responseData.biasAnalysis = biasAnalysis;
+    }
+
+    res.status(200).json(responseData);
 
   } catch (error) {
     console.error('Analysis error:', error);
@@ -124,4 +137,58 @@ Return ONLY the JSON object.`
       details: error.message 
     });
   }
+}
+
+// Subjective intensifiers lexicon
+const SUBJECTIVE_INTENSIFIERS = {
+  high: [
+    'absolutely', 'completely', 'totally', 'utterly', 'entirely',
+    'extremely', 'wildly', 'devastatingly', 'catastrophically',
+    'sheer', 'pure', 'blatant', 'flagrant', 'gross', 'overwhelming',
+    'dramatic', 'staggering', 'unprecedented', 'massive', 'enormous',
+    'incredible', 'unbelievable', 'extraordinary', 'remarkable'
+  ],
+  medium: [
+    'significant', 'seriously', 'clearly', 'major', 'substantial',
+    'considerable', 'marked', 'notable', 'important', 'severe',
+    'strong', 'powerful', 'sharp', 'striking'
+  ],
+  low: [
+    'somewhat', 'fairly', 'rather', 'quite', 'relatively',
+    'moderately', 'slightly', 'mildly', 'partially', 'mostly'
+  ]
+};
+
+function detectSubjectiveIntensifiers(text) {
+  const intensifiers = {
+    high: [],
+    medium: [],
+    low: []
+  };
+  
+  ['high', 'medium', 'low'].forEach(level => {
+    SUBJECTIVE_INTENSIFIERS[level].forEach(word => {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        intensifiers[level].push({
+          term: match[0],
+          position: match.index,
+          intensity: level
+        });
+      }
+    });
+  });
+
+  return {
+    subjectiveIntensifiers: {
+      high: intensifiers.high,
+      medium: intensifiers.medium,
+      low: intensifiers.low,
+      countHigh: intensifiers.high.length,
+      countMedium: intensifiers.medium.length,
+      countLow: intensifiers.low.length,
+      total: intensifiers.high.length + intensifiers.medium.length + intensifiers.low.length
+    }
+  };
 }
