@@ -27,9 +27,9 @@ export default async function handler(req, res) {
     let articleText = input;
     let fetchedUrl = inputType === 'url' ? input : null;
 
-    // For URL input, use web search to find article info
+    // For URL input, fetch the page and extract metadata
     if (inputType === 'url') {
-      const searchResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      const fetchResponse = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 3000,
+          max_tokens: 4000,
           tools: [
             {
               type: 'web_search_20250305',
@@ -48,55 +48,56 @@ export default async function handler(req, res) {
           messages: [
             {
               role: 'user',
-              content: `Search for information about the article at this URL: ${input}
-              
-I need you to find and tell me about this article. Provide:
-- A summary of what the article is about
-- The author if you can find it
-- The publication date if available
-- Any key topics or themes
+              content: `Look up this article URL: ${input}
 
-Don't reproduce the full article text - just provide this metadata and a summary.`
+Extract the following metadata from the page:
+1. Author name (look for author meta tags, byline, or article credits)
+2. Publication date (look for published date, article:published_time meta tag)
+3. Article title/headline
+4. Main content/text of the article
+5. Source/publication name
+
+Provide this information clearly so I can parse it.`
             }
           ]
         })
       });
 
-      const searchData = await searchResponse.json();
+      const fetchData = await fetchResponse.json();
       
       // Handle API response format
-      if (searchData.content && Array.isArray(searchData.content)) {
-        articleText = searchData.content
+      if (fetchData.content && Array.isArray(fetchData.content)) {
+        articleText = fetchData.content
           .map(item => item.type === 'text' ? item.text : '')
           .filter(Boolean)
           .join('\n');
-      } else if (searchData.error) {
-        throw new Error(`API Error: ${searchData.error.message || 'Unknown error'}`);
+      } else if (fetchData.error) {
+        throw new Error(`API Error: ${fetchData.error.message || 'Unknown error'}`);
       } else {
-        articleText = JSON.stringify(searchData);
+        articleText = JSON.stringify(fetchData);
       }
     }
 
     // Analyze and extract metadata
     const analysisPrompt = inputType === 'url'
-      ? `Based on your search about the article at ${input}, provide metadata in JSON format.
+      ? `I fetched content from ${input}. Here's what I found:
 
-Your findings:
 ${articleText}
 
-Extract a JSON object with:
+Now extract precise metadata into JSON format. Use the information provided above to fill in these fields accurately:
+
 {
-  "author": "author name or Unknown",
-  "datePublished": "date or Unknown",
-  "source": "publication name (CNN, Medium, etc.) or Unknown",
+  "author": "extract the author name from the content above, or 'Unknown' if not found",
+  "datePublished": "extract the publication date from the content above (format as readable date), or 'Unknown'",
+  "source": "extract the publication/website name from the URL or content (e.g., 'CNN', 'Medium', 'TechCrunch'), or extract from domain",
   "url": "${input}",
-  "summary": "2-3 sentence summary",
-  "topics": "comma-separated topics",
-  "readingTime": "estimate like '5 minutes'",
-  "recentVersions": "update info or 'No updates found'"
+  "summary": "write a clear 2-3 sentence summary of the article's main points based on the content above",
+  "topics": "identify 3-5 key topics as comma-separated values based on the article content",
+  "readingTime": "estimate reading time based on content length (e.g., '5 minutes')",
+  "recentVersions": "if any update information was found mention it, otherwise 'No updates found'"
 }
 
-Return ONLY valid JSON, nothing else.`
+Be precise - only use information that was actually found in the content above. Return ONLY the JSON object.`
       : `I have article text. Search online to find the source and extract metadata.
 
 Text snippet:
@@ -167,15 +168,16 @@ Return ONLY valid JSON.`;
         throw new Error('No JSON found');
       }
     } catch (parseError) {
-      // Fallback: create metadata from text
+      // Fallback: extract what we can from the text
+      const lines = fullResponse.split('\n');
       metadata = {
-        author: 'Unknown',
-        datePublished: 'Unknown',
-        source: extractSource(input),
+        author: extractField(fullResponse, 'author') || 'Unknown',
+        datePublished: extractField(fullResponse, 'date') || extractField(fullResponse, 'published') || 'Unknown',
+        source: extractSourceFromUrl(fetchedUrl || input),
         url: fetchedUrl || 'Unknown',
-        summary: fullResponse.slice(0, 300) + '...',
-        topics: 'General',
-        readingTime: estimateReadingTime(input),
+        summary: fullResponse.slice(0, 300).trim() + (fullResponse.length > 300 ? '...' : ''),
+        topics: extractField(fullResponse, 'topics') || extractField(fullResponse, 'tags') || 'General',
+        readingTime: estimateReadingTime(fullResponse),
         recentVersions: 'No updates found'
       };
     }
@@ -202,13 +204,53 @@ Return ONLY valid JSON.`;
 }
 
 // Helper functions
-function extractSource(url) {
+function extractSourceFromUrl(url) {
   try {
-    const hostname = new URL(url).hostname;
-    return hostname.replace('www.', '').split('.')[0];
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.replace('www.', '');
+    
+    // Map common domains to readable names
+    const sourceMap = {
+      'cnn.com': 'CNN',
+      'bbc.com': 'BBC',
+      'nytimes.com': 'The New York Times',
+      'washingtonpost.com': 'The Washington Post',
+      'theguardian.com': 'The Guardian',
+      'medium.com': 'Medium',
+      'techcrunch.com': 'TechCrunch',
+      'wired.com': 'Wired',
+      'arstechnica.com': 'Ars Technica',
+      'theverge.com': 'The Verge',
+      'reuters.com': 'Reuters',
+      'bloomberg.com': 'Bloomberg',
+      'forbes.com': 'Forbes',
+      'wsj.com': 'Wall Street Journal'
+    };
+    
+    return sourceMap[hostname] || hostname.split('.')[0].charAt(0).toUpperCase() + hostname.split('.')[0].slice(1);
   } catch {
     return 'Unknown';
   }
+}
+
+function extractField(text, fieldName) {
+  const patterns = [
+    new RegExp(`${fieldName}[:\\s-]+([^\\n]+)`, 'i'),
+    new RegExp(`"${fieldName}"[:\\s]+"([^"]+)"`, 'i'),
+    new RegExp(`${fieldName}[:\\s]+(.+?)(?=\\n|$)`, 'i')
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  return null;
+}
+
+function extractSource(url) {
+  return extractSourceFromUrl(url);
 }
 
 function estimateReadingTime(text) {
