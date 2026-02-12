@@ -25,11 +25,11 @@ export default async function handler(req, res) {
 
   try {
     let articleText = input;
-    let fetchedUrl = null;
+    let fetchedUrl = inputType === 'url' ? input : null;
 
-    // If URL, use web_fetch tool to get the article
+    // For URL input, use web search to find article info
     if (inputType === 'url') {
-      const fetchResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      const searchResponse = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -38,129 +38,85 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 4000,
+          max_tokens: 3000,
           tools: [
             {
-              type: 'web_fetch_20250305',
-              name: 'web_fetch'
+              type: 'web_search_20250305',
+              name: 'web_search'
             }
           ],
           messages: [
             {
               role: 'user',
-              content: `Use the web_fetch tool to retrieve the content from this URL: ${input}. Then extract just the main article text (no ads, navigation, etc.) and return it.`
+              content: `Search for information about the article at this URL: ${input}
+              
+I need you to find and tell me about this article. Provide:
+- A summary of what the article is about
+- The author if you can find it
+- The publication date if available
+- Any key topics or themes
+
+Don't reproduce the full article text - just provide this metadata and a summary.`
             }
           ]
         })
       });
 
-      const fetchData = await fetchResponse.json();
+      const searchData = await searchResponse.json();
       
-      // Handle tool use response
-      let toolResult = '';
-      for (const block of fetchData.content) {
-        if (block.type === 'tool_use') {
-          // Make a second call with the tool result
-          const toolResponse = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': process.env.ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
-              max_tokens: 4000,
-              messages: [
-                {
-                  role: 'user',
-                  content: `Use the web_fetch tool to retrieve the content from this URL: ${input}. Then extract just the main article text (no ads, navigation, etc.) and return it.`
-                },
-                {
-                  role: 'assistant',
-                  content: fetchData.content
-                },
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'tool_result',
-                      tool_use_id: block.id,
-                      content: 'Tool executed successfully'
-                    }
-                  ]
-                }
-              ],
-              tools: [
-                {
-                  type: 'web_fetch_20250305',
-                  name: 'web_fetch'
-                }
-              ]
-            })
-          });
-          
-          const toolData = await toolResponse.json();
-          articleText = toolData.content
-            .map(item => item.type === 'text' ? item.text : '')
-            .filter(Boolean)
-            .join('\n');
-          break;
-        } else if (block.type === 'text') {
-          articleText += block.text;
-        }
-      }
-      
-      if (!articleText || articleText.length < 100) {
-        articleText = fetchData.content
+      // Handle API response format
+      if (searchData.content && Array.isArray(searchData.content)) {
+        articleText = searchData.content
           .map(item => item.type === 'text' ? item.text : '')
           .filter(Boolean)
           .join('\n');
+      } else if (searchData.error) {
+        throw new Error(`API Error: ${searchData.error.message || 'Unknown error'}`);
+      } else {
+        articleText = JSON.stringify(searchData);
       }
-      
-      fetchedUrl = input;
     }
 
-    // Analyze the article
-    const prompt = inputType === 'url' 
-      ? `I've fetched an article from ${fetchedUrl}. Below is the content. Please analyze it and extract metadata.
+    // Analyze and extract metadata
+    const analysisPrompt = inputType === 'url'
+      ? `Based on your search about the article at ${input}, provide metadata in JSON format.
 
-Article content:
-${articleText.slice(0, 8000)}
+Your findings:
+${articleText}
 
-Provide a JSON object with these exact fields:
+Extract a JSON object with:
 {
   "author": "author name or Unknown",
-  "datePublished": "publication date or Unknown",
-  "source": "publication name (e.g., CNN, Medium, CNBC, etc.) or Unknown",
-  "url": "${fetchedUrl}",
-  "summary": "concise 2-3 sentence summary of the main points",
-  "topics": "comma-separated key topics/tags",
-  "readingTime": "estimated reading time (e.g., 5 minutes)",
-  "recentVersions": "info about updates or No updates found"
+  "datePublished": "date or Unknown",
+  "source": "publication name (CNN, Medium, etc.) or Unknown",
+  "url": "${input}",
+  "summary": "2-3 sentence summary",
+  "topics": "comma-separated topics",
+  "readingTime": "estimate like '5 minutes'",
+  "recentVersions": "update info or 'No updates found'"
 }
 
-Return ONLY the JSON object, no preamble or explanation.`
-      : `I have this article text. Please search online to find the original source and extract metadata.
+Return ONLY valid JSON, nothing else.`
+      : `I have article text. Search online to find the source and extract metadata.
 
-Article text:
-${input.slice(0, 5000)}
+Text snippet:
+${input.slice(0, 1000)}...
 
-Search for this article online and provide a JSON object with these exact fields:
+Provide JSON:
 {
-  "author": "author name or Unknown",
-  "datePublished": "publication date or Unknown", 
-  "source": "publication name (e.g., Medium, CNBC, etc.) or Unknown",
-  "url": "original URL if found or Unknown",
-  "summary": "concise 2-3 sentence summary",
-  "topics": "comma-separated key topics/tags",
-  "readingTime": "estimated reading time",
-  "recentVersions": "info about updates or No updates found"
+  "author": "author or Unknown",
+  "datePublished": "date or Unknown",
+  "source": "publication or Unknown",
+  "url": "URL if found or Unknown",
+  "summary": "2-3 sentence summary",
+  "topics": "comma-separated topics",
+  "readingTime": "estimate",
+  "recentVersions": "update info or 'No updates found'"
 }
 
-Return ONLY the JSON object, no other text.`;
+Return ONLY valid JSON.`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const analysisResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,57 +126,65 @@ Return ONLY the JSON object, no other text.`;
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2000,
-        tools: [
+        tools: inputType === 'text' ? [
           {
             type: 'web_search_20250305',
             name: 'web_search'
           }
-        ],
+        ] : [],
         messages: [
           {
             role: 'user',
-            content: prompt
+            content: analysisPrompt
           }
         ]
       })
     });
 
-    const data = await response.json();
+    const analysisData = await analysisResponse.json();
     
-    // Extract text response
-    const fullResponse = data.content
-      .map(item => item.type === 'text' ? item.text : '')
-      .filter(Boolean)
-      .join('\n');
+    // Handle API response format
+    let fullResponse = '';
+    if (analysisData.content && Array.isArray(analysisData.content)) {
+      fullResponse = analysisData.content
+        .map(item => item.type === 'text' ? item.text : '')
+        .filter(Boolean)
+        .join('\n');
+    } else if (analysisData.error) {
+      throw new Error(`API Error: ${analysisData.error.message || 'Unknown error'}`);
+    } else {
+      fullResponse = JSON.stringify(analysisData);
+    }
 
     // Parse JSON from response
     let metadata;
     try {
+      // Try to find JSON in the response
       const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         metadata = JSON.parse(jsonMatch[0]);
       } else {
         throw new Error('No JSON found');
       }
-    } catch {
-      // Fallback parsing
+    } catch (parseError) {
+      // Fallback: create metadata from text
       metadata = {
         author: 'Unknown',
         datePublished: 'Unknown',
-        source: 'Unknown',
+        source: extractSource(input),
         url: fetchedUrl || 'Unknown',
-        summary: fullResponse.slice(0, 300),
-        topics: 'N/A',
-        readingTime: 'N/A',
+        summary: fullResponse.slice(0, 300) + '...',
+        topics: 'General',
+        readingTime: estimateReadingTime(input),
         recentVersions: 'No updates found'
       };
     }
 
-    // Calculate word count
-    const wordCount = (inputType === 'url' ? articleText : input).trim().split(/\s+/).length;
+    // Calculate word count from input
+    const wordCount = input.trim().split(/\s+/).length;
 
     res.status(200).json({
-      text: inputType === 'url' ? articleText : input,
+      text: inputType === 'url' ? `Article from: ${input}\n\n${fullResponse}` : input,
       metadata: {
         ...metadata,
         wordCount,
@@ -230,6 +194,25 @@ Return ONLY the JSON object, no other text.`;
 
   } catch (error) {
     console.error('Analysis error:', error);
-    res.status(500).json({ error: 'Failed to analyze article', details: error.message });
+    res.status(500).json({ 
+      error: 'Failed to analyze article', 
+      details: error.message || 'Unknown error'
+    });
   }
+}
+
+// Helper functions
+function extractSource(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace('www.', '').split('.')[0];
+  } catch {
+    return 'Unknown';
+  }
+}
+
+function estimateReadingTime(text) {
+  const words = text.trim().split(/\s+/).length;
+  const minutes = Math.ceil(words / 200);
+  return `${minutes} minute${minutes > 1 ? 's' : ''}`;
 }
