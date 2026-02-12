@@ -1,22 +1,21 @@
 import React, { useState } from 'react';
-import { Search, FileText, Loader2, ExternalLink } from 'lucide-react';
+import { Search, FileText, Loader2 } from 'lucide-react';
 
 export default function ArticleAnalyzer() {
-  const [inputType, setInputType] = useState('url');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [articleData, setArticleData] = useState(null);
+  const [metadata, setMetadata] = useState(null);
   const [error, setError] = useState('');
 
   const analyzeArticle = async () => {
     if (!input.trim()) {
-      setError('Please enter a URL or paste some text');
+      setError('Please paste article text');
       return;
     }
 
     setLoading(true);
     setError('');
-    setArticleData(null);
+    setMetadata(null);
 
     try {
       const response = await fetch('/api/analyze', {
@@ -25,8 +24,7 @@ export default function ArticleAnalyzer() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          inputType,
-          input
+          text: input
         })
       });
 
@@ -35,7 +33,7 @@ export default function ArticleAnalyzer() {
       }
 
       const data = await response.json();
-      setArticleData(data);
+      setMetadata(data);
 
     } catch (err) {
       setError('Failed to analyze article. Please try again.');
@@ -45,153 +43,93 @@ export default function ArticleAnalyzer() {
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && inputType === 'url' && !e.shiftKey) {
-      analyzeArticle();
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-slate-800 mb-2">Article Analyzer</h1>
-          <p className="text-slate-600">Extract metadata and insights from any article using AI</p>
+          <p className="text-slate-600">Paste article text to extract metadata and insights using AI</p>
         </div>
 
-        {/* Input Section */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex gap-4 mb-4">
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Left Panel - Article Input */}
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <FileText size={24} />
+              Article Text
+            </h2>
+            
+            <textarea
+              placeholder="Paste your article text here..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              className="w-full h-[500px] px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans text-slate-700"
+            />
+
             <button
-              onClick={() => {
-                setInputType('url');
-                setInput('');
-                setError('');
-              }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                inputType === 'url'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
+              onClick={analyzeArticle}
+              disabled={loading || !input.trim()}
+              className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
             >
-              <ExternalLink size={18} />
-              URL
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={18} />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Search size={18} />
+                  Analyze Article
+                </>
+              )}
             </button>
-            <button
-              onClick={() => {
-                setInputType('text');
-                setInput('');
-                setError('');
-              }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                inputType === 'text'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <FileText size={18} />
-              Text
-            </button>
+
+            {error && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                {error}
+              </div>
+            )}
           </div>
 
-          {inputType === 'url' ? (
-            <input
-              type="text"
-              placeholder="Enter article URL... (e.g., https://example.com/article)"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          ) : (
-            <textarea
-              placeholder="Paste article text here..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              rows={6}
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            />
-          )}
+          {/* Right Panel - Metadata */}
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Search size={24} />
+              Metadata
+            </h2>
 
-          <button
-            onClick={analyzeArticle}
-            disabled={loading}
-            className="mt-4 flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="animate-spin" size={18} />
-                Analyzing...
-              </>
-            ) : (
-              <>
-                <Search size={18} />
-                Analyze Article
-              </>
-            )}
-          </button>
-
-          {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Two Panel Layout */}
-        {articleData && (
-          <div className="grid lg:grid-cols-2 gap-6">
-            {/* Left Panel - Article Text */}
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <FileText size={24} />
-                Article
-              </h2>
-              <div className="prose max-w-none text-slate-700 max-h-[600px] overflow-y-auto pr-2">
-                <p className="whitespace-pre-wrap leading-relaxed">{articleData.text}</p>
+            {!metadata && !loading && (
+              <div className="flex items-center justify-center h-[500px] text-slate-400">
+                <p className="text-center">
+                  Paste article text and click<br />"Analyze Article" to see metadata
+                </p>
               </div>
-            </div>
+            )}
 
-            {/* Right Panel - Metadata */}
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Search size={24} />
-                Metadata
-              </h2>
-              <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                <MetadataItem label="Author" value={articleData.metadata.author} />
-                <MetadataItem label="Date Published" value={articleData.metadata.datePublished} />
-                <MetadataItem label="Source" value={articleData.metadata.source} />
-                <MetadataItem label="Word Count" value={articleData.metadata.wordCount.toLocaleString()} />
-                <MetadataItem label="Reading Time" value={articleData.metadata.readingTime} />
+            {metadata && (
+              <div className="space-y-4 max-h-[580px] overflow-y-auto pr-2">
+                <MetadataItem label="Author" value={metadata.author} />
+                <MetadataItem label="Date Published" value={metadata.datePublished} />
+                <MetadataItem label="Source" value={metadata.source} />
+                <MetadataItem label="Word Count" value={metadata.wordCount?.toLocaleString()} />
+                <MetadataItem label="Reading Time" value={metadata.readingTime} />
                 
-                {articleData.metadata.url && articleData.metadata.url !== 'N/A' && articleData.metadata.url !== 'Unknown' && (
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">URL</span>
-                    <a 
-                      href={articleData.metadata.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline break-all mt-1 flex items-center gap-1"
-                    >
-                      {articleData.metadata.url}
-                      <ExternalLink size={14} />
-                    </a>
-                  </div>
+                {metadata.url && metadata.url !== 'Unable to locate' && (
+                  <MetadataItem label="URL" value={metadata.url} />
                 )}
                 
                 <div className="pt-4 border-t border-slate-200">
                   <h3 className="font-semibold text-slate-700 mb-2">Summary</h3>
                   <p className="text-slate-600 text-sm leading-relaxed">
-                    {articleData.metadata.summary}
+                    {metadata.summary}
                   </p>
                 </div>
 
-                {articleData.metadata.topics && articleData.metadata.topics !== 'N/A' && (
+                {metadata.topics && metadata.topics !== 'Unable to locate' && (
                   <div className="pt-4 border-t border-slate-200">
                     <h3 className="font-semibold text-slate-700 mb-2">Topics</h3>
                     <div className="flex flex-wrap gap-2">
-                      {articleData.metadata.topics.split(',').map((topic, i) => (
+                      {metadata.topics.split(',').map((topic, i) => (
                         <span key={i} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
                           {topic.trim()}
                         </span>
@@ -199,17 +137,10 @@ export default function ArticleAnalyzer() {
                     </div>
                   </div>
                 )}
-
-                {articleData.metadata.recentVersions && articleData.metadata.recentVersions !== 'No updates found' && (
-                  <div className="pt-4 border-t border-slate-200">
-                    <h3 className="font-semibold text-slate-700 mb-2">Recent Versions</h3>
-                    <p className="text-slate-600 text-sm">{articleData.metadata.recentVersions}</p>
-                  </div>
-                )}
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -219,7 +150,7 @@ function MetadataItem({ label, value }) {
   return (
     <div className="flex flex-col">
       <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">{label}</span>
-      <span className="text-slate-800 mt-1">{value}</span>
+      <span className="text-slate-800 mt-1">{value || 'Unable to locate'}</span>
     </div>
   );
 }

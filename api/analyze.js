@@ -17,46 +17,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { inputType, input } = req.body;
+  const { text } = req.body;
 
-  if (!input) {
-    return res.status(400).json({ error: 'No input provided' });
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'No text provided' });
   }
 
   try {
-    let articleText = input;
-    let rawHtml = '';
-    const fetchedUrl = inputType === 'url' ? input : null;
+    // Calculate word count immediately - this always works
+    const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+    const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
-    // Step 1: If URL, fetch the actual HTML using a CORS proxy
-    if (inputType === 'url') {
-      try {
-        // Use a public CORS proxy to fetch the page
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(input)}`;
-        const htmlResponse = await fetch(proxyUrl);
-        rawHtml = await htmlResponse.text();
-        
-        // Basic HTML parsing - extract text content
-        // Remove scripts, styles, and HTML tags
-        let cleanText = rawHtml
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-          .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        articleText = cleanText;
-      } catch (fetchError) {
-        console.error('Fetch error:', fetchError);
-        return res.status(500).json({ 
-          error: 'Failed to fetch URL', 
-          details: 'Unable to access the article. Try pasting the text instead.' 
-        });
-      }
-    }
-
-    // Step 2: Use Claude to analyze the text and extract metadata
-    const analysisResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    // Use Claude to: 1) Create summary, 2) Search for source metadata
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -66,110 +39,82 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 3000,
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search'
+          }
+        ],
         messages: [
           {
             role: 'user',
-            content: inputType === 'url' 
-              ? `I scraped this article from ${input}. Here's the extracted text:
+            content: `Here's an article text. Please:
+1. Write a clear 2-3 sentence summary
+2. Identify 4-5 key topics (comma-separated)
+3. Search the web to find the original source URL, author, and publication date
 
-${articleText.slice(0, 6000)}
+Article text:
+${text.slice(0, 5000)}
 
-Please analyze it and provide metadata in JSON format:
+Provide your response as JSON:
 {
-  "author": "extract author name or 'Unknown'",
-  "datePublished": "extract date or 'Unknown'",
-  "source": "${extractSourceName(input)}",
-  "title": "extract headline/title",
-  "summary": "2-3 sentence summary of main points",
-  "topics": "comma-separated key topics (4-5)",
-  "cleanArticleText": "the main article content, cleaned up and formatted"
+  "summary": "your 2-3 sentence summary here",
+  "topics": "topic1, topic2, topic3, topic4",
+  "author": "author name if found, otherwise 'Unable to locate'",
+  "datePublished": "date if found, otherwise 'Unable to locate'",
+  "source": "publication name if found (CNN, NYT, etc.), otherwise 'Unable to locate'",
+  "url": "original URL if found, otherwise 'Unable to locate'"
 }
 
 Return ONLY the JSON object.`
-              : `Here's article text to analyze:
-
-${input.slice(0, 6000)}
-
-Provide metadata in JSON:
-{
-  "author": "Unknown",
-  "datePublished": "Unknown",
-  "source": "Unknown",
-  "title": "Extract or create a title",
-  "summary": "2-3 sentence summary",
-  "topics": "comma-separated topics",
-  "cleanArticleText": "${input}"
-}
-
-Return ONLY JSON.`
           }
         ]
       })
     });
 
-    const analysisData = await analysisResponse.json();
+    const data = await response.json();
     
-    let analysisText = '';
-    if (analysisData.content && Array.isArray(analysisData.content)) {
-      analysisText = analysisData.content
+    // Extract Claude's response
+    let claudeResponse = '';
+    if (data.content && Array.isArray(data.content)) {
+      claudeResponse = data.content
         .map(item => item.type === 'text' ? item.text : '')
         .filter(Boolean)
         .join('\n');
     }
 
-    // Parse JSON response
+    // Parse JSON from response
     let metadata;
-    let finalArticleText = articleText;
-    
     try {
-      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+      const jsonMatch = claudeResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        
-        // Use cleaned article text if provided
-        if (parsed.cleanArticleText) {
-          finalArticleText = parsed.cleanArticleText;
-        }
-        
-        // Calculate word count from actual article text
-        const wordCount = finalArticleText.trim().split(/\s+/).filter(w => w.length > 0).length;
-        const readingTime = Math.max(1, Math.ceil(wordCount / 200));
-        
-        metadata = {
-          author: parsed.author || 'Unknown',
-          datePublished: parsed.datePublished || 'Unknown',
-          source: parsed.source || (fetchedUrl ? extractSourceName(fetchedUrl) : 'Unknown'),
-          url: fetchedUrl || 'Unknown',
-          summary: parsed.summary || 'No summary available',
-          topics: parsed.topics || 'General',
-          readingTime: `${readingTime} minute${readingTime !== 1 ? 's' : ''}`,
-          recentVersions: 'No updates found',
-          wordCount
-        };
+        metadata = JSON.parse(jsonMatch[0]);
       } else {
-        throw new Error('No JSON found in response');
+        throw new Error('No JSON in response');
       }
     } catch (parseError) {
       console.error('Parse error:', parseError);
-      // Fallback metadata
-      const wordCount = finalArticleText.trim().split(/\s+/).filter(w => w.length > 0).length;
+      // Fallback - create basic metadata
       metadata = {
-        author: 'Unknown',
-        datePublished: 'Unknown',
-        source: fetchedUrl ? extractSourceName(fetchedUrl) : 'Unknown',
-        url: fetchedUrl || 'Unknown',
-        summary: analysisText.slice(0, 300) + '...',
-        topics: 'General',
-        readingTime: `${Math.max(1, Math.ceil(wordCount / 200))} minutes`,
-        recentVersions: 'No updates found',
-        wordCount
+        summary: claudeResponse.slice(0, 300) || 'Summary could not be generated.',
+        topics: 'Unable to locate',
+        author: 'Unable to locate',
+        datePublished: 'Unable to locate',
+        source: 'Unable to locate',
+        url: 'Unable to locate'
       };
     }
 
-    // Return clean article text (not JSON) for display
+    // Return metadata with guaranteed word count and reading time
     res.status(200).json({
-      text: finalArticleText,
-      metadata
+      wordCount,
+      readingTime: `${readingTime} minute${readingTime !== 1 ? 's' : ''}`,
+      summary: metadata.summary || 'Summary not available',
+      topics: metadata.topics || 'Unable to locate',
+      author: metadata.author || 'Unable to locate',
+      datePublished: metadata.datePublished || 'Unable to locate',
+      source: metadata.source || 'Unable to locate',
+      url: metadata.url || 'Unable to locate'
     });
 
   } catch (error) {
@@ -178,38 +123,5 @@ Return ONLY JSON.`
       error: 'Failed to analyze article', 
       details: error.message 
     });
-  }
-}
-
-function extractSourceName(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.replace('www.', '');
-    
-    const sourceMap = {
-      'cnn.com': 'CNN',
-      'bbc.com': 'BBC',
-      'bbc.co.uk': 'BBC',
-      'nytimes.com': 'The New York Times',
-      'washingtonpost.com': 'The Washington Post',
-      'theguardian.com': 'The Guardian',
-      'guardian.co.uk': 'The Guardian',
-      'medium.com': 'Medium',
-      'techcrunch.com': 'TechCrunch',
-      'wired.com': 'Wired',
-      'arstechnica.com': 'Ars Technica',
-      'theverge.com': 'The Verge',
-      'reuters.com': 'Reuters',
-      'bloomberg.com': 'Bloomberg',
-      'forbes.com': 'Forbes',
-      'wsj.com': 'Wall Street Journal',
-      'ft.com': 'Financial Times',
-      'apnews.com': 'Associated Press',
-      'npr.org': 'NPR'
-    };
-    
-    return sourceMap[hostname] || hostname.split('.')[0].charAt(0).toUpperCase() + hostname.split('.')[0].slice(1);
-  } catch {
-    return 'Unknown';
   }
 }
