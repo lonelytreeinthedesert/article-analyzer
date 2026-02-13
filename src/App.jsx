@@ -62,12 +62,32 @@ export default function ArticleAnalyzer() {
       });
     });
 
-    // Sort by position (reverse for insertion)
-    markers.sort((a, b) => b.start - a.start);
+    // Remove overlapping markers (keep first one found)
+    const uniqueMarkers = [];
+    markers.sort((a, b) => a.start - b.start);
+    
+    for (const marker of markers) {
+      const overlaps = uniqueMarkers.some(existing => 
+        (marker.start >= existing.start && marker.start < existing.end) ||
+        (marker.end > existing.start && marker.end <= existing.end) ||
+        (marker.start <= existing.start && marker.end >= existing.end)
+      );
+      if (!overlaps) {
+        uniqueMarkers.push(marker);
+      }
+    }
 
-    // Apply highlighting
-    let result = text;
-    markers.forEach(marker => {
+    // Sort by position DESC for reverse insertion
+    uniqueMarkers.sort((a, b) => b.start - a.start);
+
+    // Escape HTML in original text first
+    let result = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    // Apply highlighting by inserting from end to beginning
+    uniqueMarkers.forEach(marker => {
       const className = marker.level === 'high' 
         ? 'bg-yellow-300 border-b-2 border-yellow-600'
         : marker.level === 'medium'
@@ -82,6 +102,9 @@ export default function ArticleAnalyzer() {
       
       result = `${before}<span class="${className}" title="${title}">${highlighted}</span>${after}`;
     });
+
+    // Convert newlines to <br /> tags
+    result = result.replace(/\n/g, '<br />');
 
     return result;
   };
