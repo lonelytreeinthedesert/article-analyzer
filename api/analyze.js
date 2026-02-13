@@ -146,16 +146,29 @@ const SUBJECTIVE_INTENSIFIERS = {
     'extremely', 'wildly', 'devastatingly', 'catastrophically',
     'sheer', 'pure', 'blatant', 'flagrant', 'gross', 'overwhelming',
     'dramatic', 'staggering', 'unprecedented', 'massive', 'enormous',
-    'incredible', 'unbelievable', 'extraordinary', 'remarkable'
+    'incredible', 'unbelievable', 'extraordinary', 'remarkable',
+    'most powerful', 'most important', 'most significant', 'most dangerous',
+    'most critical', 'most severe', 'most dramatic', 'most devastating',
+    'highly significant', 'highly controversial', 'highly unusual',
+    'deeply troubling', 'deeply concerning', 'deeply flawed',
+    'severely limited', 'severely damaged', 'severely compromised',
+    'sharply divided', 'sharply criticized', 'bitterly divided',
+    'fiercely contested', 'fiercely debated', 'strongly opposed',
+    'wholly inadequate', 'wholly unacceptable', 'fundamentally flawed',
+    'gravely concerned', 'profoundly important', 'acutely aware'
   ],
   medium: [
     'significant', 'seriously', 'clearly', 'major', 'substantial',
     'considerable', 'marked', 'notable', 'important', 'severe',
-    'strong', 'powerful', 'sharp', 'striking'
+    'strong', 'powerful', 'sharp', 'striking', 'very',
+    'highly', 'deeply', 'particularly', 'especially', 'notably',
+    'increasingly', 'largely', 'widely', 'greatly', 'heavily',
+    'strongly', 'firmly', 'broadly', 'generally'
   ],
   low: [
     'somewhat', 'fairly', 'rather', 'quite', 'relatively',
-    'moderately', 'slightly', 'mildly', 'partially', 'mostly'
+    'moderately', 'slightly', 'mildly', 'partially', 'mostly',
+    'largely', 'generally', 'typically', 'usually', 'often'
   ]
 };
 
@@ -168,8 +181,17 @@ function detectSubjectiveIntensifiers(text) {
   
   ['high', 'medium', 'low'].forEach(level => {
     SUBJECTIVE_INTENSIFIERS[level].forEach(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      // Handle both single words and multi-word phrases
+      // Use word boundaries for single words, but be more flexible for phrases
+      const isPhrase = word.includes(' ');
+      const pattern = isPhrase 
+        ? word.replace(/\s+/g, '\\s+') // Allow flexible whitespace in phrases
+        : `\\b${word}\\b`; // Word boundaries for single words
+      
+      const regex = new RegExp(pattern, 'gi');
       let match;
+      
+      // Use exec() in a loop to find all matches with correct positions
       while ((match = regex.exec(text)) !== null) {
         intensifiers[level].push({
           term: match[0],
