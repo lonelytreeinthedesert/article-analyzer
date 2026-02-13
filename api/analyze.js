@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { text, analyzeBias } = req.body;
+  const { text, detectIntensifiers, detectFactives } = req.body;
 
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'No text provided' });
@@ -29,9 +29,16 @@ export default async function handler(req, res) {
     const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
     // Perform bias detection if requested
-    let biasAnalysis = null;
-    if (analyzeBias) {
-      biasAnalysis = detectSubjectiveIntensifiers(text);
+    let biasAnalysis = {};
+    
+    if (detectIntensifiers) {
+      const intensifierData = detectSubjectiveIntensifiers(text);
+      biasAnalysis.subjectiveIntensifiers = intensifierData.subjectiveIntensifiers;
+    }
+    
+    if (detectFactives) {
+      const factiveData = detectFactiveVerbs(text);
+      biasAnalysis.factiveVerbs = factiveData.factiveVerbs;
     }
 
     // Use Claude to: 1) Create summary, 2) Search for source metadata
@@ -123,8 +130,8 @@ Return ONLY the JSON object.`
       url: metadata.url || 'Unable to locate'
     };
 
-    // Add bias analysis if requested
-    if (biasAnalysis) {
+    // Add bias analysis if any was performed
+    if (Object.keys(biasAnalysis).length > 0) {
       responseData.biasAnalysis = biasAnalysis;
     }
 
@@ -172,6 +179,49 @@ const SUBJECTIVE_INTENSIFIERS = {
   ]
 };
 
+// Factive verbs lexicon - verbs that presuppose the truth of their complement
+const FACTIVE_VERBS = [
+  // Core factive verbs
+  'realize', 'realized', 'realizes', 'realizing',
+  'discover', 'discovered', 'discovers', 'discovering',
+  'reveal', 'revealed', 'reveals', 'revealing',
+  'know', 'knew', 'knows', 'knowing', 'known',
+  'learn', 'learned', 'learns', 'learning', 'learnt',
+  'find out', 'found out', 'finds out', 'finding out',
+  'see', 'saw', 'sees', 'seeing', 'seen',
+  
+  // Awareness/perception factives
+  'notice', 'noticed', 'notices', 'noticing',
+  'observe', 'observed', 'observes', 'observing',
+  'recognize', 'recognized', 'recognizes', 'recognizing',
+  'understand', 'understood', 'understands', 'understanding',
+  'grasp', 'grasped', 'grasps', 'grasping',
+  'perceive', 'perceived', 'perceives', 'perceiving',
+  'become aware', 'became aware', 'becoming aware',
+  
+  // Memory factives
+  'remember', 'remembered', 'remembers', 'remembering',
+  'recall', 'recalled', 'recalls', 'recalling',
+  'forget', 'forgot', 'forgets', 'forgetting', 'forgotten',
+  
+  // Emotional factives
+  'regret', 'regretted', 'regrets', 'regretting',
+  'resent', 'resented', 'resents', 'resenting',
+  'deplore', 'deplored', 'deplores', 'deploring',
+  
+  // Communication factives
+  'acknowledge', 'acknowledged', 'acknowledges', 'acknowledging',
+  'admit', 'admitted', 'admits', 'admitting',
+  'confess', 'confessed', 'confesses', 'confessing',
+  'disclose', 'disclosed', 'discloses', 'disclosing',
+  
+  // Confirmation factives
+  'confirm', 'confirmed', 'confirms', 'confirming',
+  'verify', 'verified', 'verifies', 'verifying',
+  'demonstrate', 'demonstrated', 'demonstrates', 'demonstrating',
+  'establish', 'established', 'establishes', 'establishing'
+];
+
 function detectSubjectiveIntensifiers(text) {
   const intensifiers = {
     high: [],
@@ -211,6 +261,35 @@ function detectSubjectiveIntensifiers(text) {
       countMedium: intensifiers.medium.length,
       countLow: intensifiers.low.length,
       total: intensifiers.high.length + intensifiers.medium.length + intensifiers.low.length
+    }
+  };
+}
+
+function detectFactiveVerbs(text) {
+  const factives = [];
+  
+  FACTIVE_VERBS.forEach(verb => {
+    // Handle both single words and multi-word phrases
+    const isPhrase = verb.includes(' ');
+    const pattern = isPhrase 
+      ? verb.replace(/\s+/g, '\\s+')
+      : `\\b${verb}\\b`;
+    
+    const regex = new RegExp(pattern, 'gi');
+    let match;
+    
+    while ((match = regex.exec(text)) !== null) {
+      factives.push({
+        term: match[0],
+        position: match.index
+      });
+    }
+  });
+
+  return {
+    factiveVerbs: {
+      instances: factives,
+      count: factives.length
     }
   };
 }
