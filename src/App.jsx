@@ -6,7 +6,8 @@ export default function ArticleAnalyzer() {
   const [loading, setLoading] = useState(false);
   const [metadata, setMetadata] = useState(null);
   const [error, setError] = useState('');
-  const [analyzeBias, setAnalyzeBias] = useState(false);
+  const [detectIntensifiers, setDetectIntensifiers] = useState(false);
+  const [detectFactives, setDetectFactives] = useState(false);
 
   const analyzeArticle = async () => {
     if (!input.trim()) {
@@ -26,7 +27,8 @@ export default function ArticleAnalyzer() {
         },
         body: JSON.stringify({
           text: input,
-          analyzeBias: analyzeBias
+          detectIntensifiers: detectIntensifiers,
+          detectFactives: detectFactives
         })
       });
 
@@ -45,24 +47,38 @@ export default function ArticleAnalyzer() {
     }
   };
 
-  const highlightIntensifiers = (text, intensifiers) => {
-    if (!intensifiers) return text;
+  const highlightBias = (text, biasAnalysis) => {
+    if (!biasAnalysis) return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br />');
 
     const markers = [];
     
-    // Collect all intensifier instances
-    ['high', 'medium', 'low'].forEach(level => {
-      intensifiers[level].forEach(item => {
+    // Collect intensifiers
+    if (biasAnalysis.subjectiveIntensifiers) {
+      ['high', 'medium', 'low'].forEach(level => {
+        biasAnalysis.subjectiveIntensifiers[level].forEach(item => {
+          markers.push({
+            start: item.position,
+            end: item.position + item.term.length,
+            type: `intensifier-${level}`,
+            term: item.term
+          });
+        });
+      });
+    }
+    
+    // Collect factive verbs
+    if (biasAnalysis.factiveVerbs) {
+      biasAnalysis.factiveVerbs.instances.forEach(item => {
         markers.push({
           start: item.position,
           end: item.position + item.term.length,
-          level: level,
+          type: 'factive',
           term: item.term
         });
       });
-    });
+    }
 
-    // Remove overlapping markers (keep first one found)
+    // Remove overlapping markers
     const uniqueMarkers = [];
     markers.sort((a, b) => a.start - b.start);
     
@@ -77,24 +93,31 @@ export default function ArticleAnalyzer() {
       }
     }
 
-    // Sort by position DESC for reverse insertion
+    // Sort DESC for reverse insertion
     uniqueMarkers.sort((a, b) => b.start - a.start);
 
-    // Escape HTML in original text first
+    // Escape HTML first
     let result = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     
-    // Apply highlighting by inserting from end to beginning
+    // Apply highlighting
     uniqueMarkers.forEach(marker => {
-      const className = marker.level === 'high' 
-        ? 'bg-yellow-300 border-b-2 border-yellow-600'
-        : marker.level === 'medium'
-        ? 'bg-yellow-200 border-b-2 border-yellow-500'
-        : 'bg-yellow-100 border-b-2 border-yellow-400';
+      let className, title;
       
-      const title = `Subjective intensifier (${marker.level} intensity)`;
+      if (marker.type.startsWith('intensifier')) {
+        const level = marker.type.split('-')[1];
+        className = level === 'high' 
+          ? 'bg-yellow-300 border-b-2 border-yellow-600'
+          : level === 'medium'
+          ? 'bg-yellow-200 border-b-2 border-yellow-500'
+          : 'bg-yellow-100 border-b-2 border-yellow-400';
+        title = `Subjective intensifier (${level} intensity)`;
+      } else if (marker.type === 'factive') {
+        className = 'bg-green-200 border-b-2 border-green-600';
+        title = 'Factive verb (presupposes truth)';
+      }
       
       const before = result.substring(0, marker.start);
       const highlighted = result.substring(marker.start, marker.end);
@@ -103,11 +126,14 @@ export default function ArticleAnalyzer() {
       result = `${before}<span class="${className}" title="${title}">${highlighted}</span>${after}`;
     });
 
-    // Convert newlines to <br /> tags
+    // Convert newlines to <br />
     result = result.replace(/\n/g, '<br />');
 
     return result;
   };
+
+  const hasBiasAnalysis = metadata?.biasAnalysis && 
+    (metadata.biasAnalysis.subjectiveIntensifiers || metadata.biasAnalysis.factiveVerbs);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
@@ -131,25 +157,44 @@ export default function ArticleAnalyzer() {
                   placeholder="Paste your article text here..."
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  className="w-full h-[450px] px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans text-slate-700"
+                  className="w-full h-[400px] px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans text-slate-700"
                 />
 
-                {/* Bias Analysis Option */}
-                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={analyzeBias}
-                      onChange={(e) => setAnalyzeBias(e.target.checked)}
-                      className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                    />
-                    <div>
-                      <span className="font-semibold text-slate-800">Analyze for bias (experimental)</span>
-                      <p className="text-sm text-slate-600 mt-1">
-                        Detects subjective intensifiers - adjectives and adverbs that amplify meaning
-                      </p>
-                    </div>
-                  </label>
+                {/* Bias Analysis Options */}
+                <div className="mt-4 space-y-3">
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={detectIntensifiers}
+                        onChange={(e) => setDetectIntensifiers(e.target.checked)}
+                        className="mt-1 w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="font-semibold text-slate-800">Identify intensifiers</span>
+                        <p className="text-sm text-slate-600 mt-1">
+                          Detects adjectives and adverbs that amplify meaning
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={detectFactives}
+                        onChange={(e) => setDetectFactives(e.target.checked)}
+                        className="mt-1 w-5 h-5 text-green-600 border-slate-300 rounded focus:ring-green-500"
+                      />
+                      <div>
+                        <span className="font-semibold text-slate-800">Identify factive verbs</span>
+                        <p className="text-sm text-slate-600 mt-1">
+                          Detects verbs that presuppose the truth of their statement
+                        </p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
 
                 <button
@@ -178,33 +223,39 @@ export default function ArticleAnalyzer() {
               </>
             ) : (
               <>
-                {metadata.biasAnalysis && (
+                {hasBiasAnalysis && (
                   <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
                     <div className="text-sm font-semibold text-slate-700 mb-2">Highlighting Legend:</div>
                     <div className="flex flex-wrap gap-3 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="bg-yellow-300 border-b-2 border-yellow-600 px-2 py-1">Dark Yellow</span>
-                        <span>High intensity</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="bg-yellow-200 border-b-2 border-yellow-500 px-2 py-1">Medium Yellow</span>
-                        <span>Medium intensity</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="bg-yellow-100 border-b-2 border-yellow-400 px-2 py-1">Light Yellow</span>
-                        <span>Low intensity</span>
-                      </div>
+                      {metadata.biasAnalysis.subjectiveIntensifiers && (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-yellow-300 border-b-2 border-yellow-600 px-2 py-1">Dark Yellow</span>
+                            <span>High intensity</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-yellow-200 border-b-2 border-yellow-500 px-2 py-1">Medium Yellow</span>
+                            <span>Medium intensity</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-yellow-100 border-b-2 border-yellow-400 px-2 py-1">Light Yellow</span>
+                            <span>Low intensity</span>
+                          </div>
+                        </>
+                      )}
+                      {metadata.biasAnalysis.factiveVerbs && (
+                        <div className="flex items-center gap-2">
+                          <span className="bg-green-200 border-b-2 border-green-600 px-2 py-1">Green</span>
+                          <span>Factive verb</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
                 
                 <div 
-                  className="prose max-w-none text-slate-700 max-h-[500px] overflow-y-auto pr-2 leading-relaxed"
-                  dangerouslySetInnerHTML={{ 
-                    __html: metadata.biasAnalysis 
-                      ? highlightIntensifiers(input, metadata.biasAnalysis.subjectiveIntensifiers)
-                      : input.replace(/\n/g, '<br />')
-                  }}
+                  className="prose max-w-none text-slate-700 max-h-[450px] overflow-y-auto pr-2 leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: highlightBias(input, metadata.biasAnalysis) }}
                 />
                 
                 <button
@@ -267,42 +318,63 @@ export default function ArticleAnalyzer() {
                 )}
 
                 {/* Bias Analysis Section */}
-                {metadata.biasAnalysis && (
+                {hasBiasAnalysis && (
                   <div className="pt-4 border-t-2 border-slate-300">
                     <h3 className="text-lg font-bold text-slate-700 mb-3">Bias Analysis</h3>
                     
-                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                      <h4 className="font-semibold text-slate-700 mb-3">
-                        Subjective Intensifiers: {metadata.biasAnalysis.subjectiveIntensifiers.total}
-                      </h4>
-                      <div className="text-sm space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">High intensity:</span>
-                          <strong className="text-yellow-700">
-                            {metadata.biasAnalysis.subjectiveIntensifiers.countHigh}
-                          </strong>
+                    <div className="space-y-3">
+                      {/* Subjective Intensifiers */}
+                      {metadata.biasAnalysis.subjectiveIntensifiers && (
+                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                          <h4 className="font-semibold text-slate-700 mb-3">
+                            Subjective Intensifiers: {metadata.biasAnalysis.subjectiveIntensifiers.total}
+                          </h4>
+                          <div className="text-sm space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">High intensity:</span>
+                              <strong className="text-yellow-700">
+                                {metadata.biasAnalysis.subjectiveIntensifiers.countHigh}
+                              </strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Medium intensity:</span>
+                              <strong className="text-yellow-600">
+                                {metadata.biasAnalysis.subjectiveIntensifiers.countMedium}
+                              </strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Low intensity:</span>
+                              <strong className="text-yellow-500">
+                                {metadata.biasAnalysis.subjectiveIntensifiers.countLow}
+                              </strong>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-3 pt-3 border-t border-yellow-300">
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              Adjectives and adverbs that amplify or reinforce meaning, potentially swaying readers.
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">Medium intensity:</span>
-                          <strong className="text-yellow-600">
-                            {metadata.biasAnalysis.subjectiveIntensifiers.countMedium}
-                          </strong>
+                      )}
+
+                      {/* Factive Verbs */}
+                      {metadata.biasAnalysis.factiveVerbs && (
+                        <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                          <h4 className="font-semibold text-slate-700 mb-3">
+                            Factive Verbs: {metadata.biasAnalysis.factiveVerbs.count}
+                          </h4>
+                          
+                          <div className="mt-3 pt-3 border-t border-green-300">
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              <strong>What are factive verbs?</strong><br />
+                              Verbs like "realize," "discover," "reveal," and "know" that presuppose the truth of what follows. 
+                              For example, "Trump revealed that regulations were burdensome" presupposes they ARE burdensome, 
+                              whereas "Trump said regulations were burdensome" just reports the statement.
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">Low intensity:</span>
-                          <strong className="text-yellow-500">
-                            {metadata.biasAnalysis.subjectiveIntensifiers.countLow}
-                          </strong>
-                        </div>
-                      </div>
-                      
-                      <div className="mt-4 pt-4 border-t border-slate-300">
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          <strong>What are subjective intensifiers?</strong><br />
-                          Adjectives and adverbs that amplify or reinforce the meaning of statements. 
-                          They can sway readers by strengthening emotional impact beyond neutral reporting.
-                        </p>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
