@@ -4,7 +4,14 @@ echo Article Analyzer - Git Deploy Script
 echo ========================================
 echo.
 
-cd /d "C:\Users\trive\Article Analyzer"
+cd /d "Z:\Triveni - Career & Learning\Article Analyzer"
+
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Could not find project folder.
+    echo Make sure your network drive Z: is connected.
+    pause
+    exit /b 1
+)
 
 echo Current directory: %CD%
 echo.
