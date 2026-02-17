@@ -1,56 +1,12 @@
 import React, { useState } from 'react';
 import { Search, FileText, Loader2 } from 'lucide-react';
 
-function EngineToggle({ label, description, color, enabled, onChange }) {
-  const colors = {
-    yellow: {
-      bg: enabled ? 'bg-yellow-400' : 'bg-slate-300',
-      border: 'border-yellow-200',
-      container: 'bg-yellow-50',
-      badge: enabled ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-500',
-    },
-    green: {
-      bg: enabled ? 'bg-green-500' : 'bg-slate-300',
-      border: 'border-green-200',
-      container: 'bg-green-50',
-      badge: enabled ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-500',
-    },
-  };
-  const c = colors[color];
-
-  return (
-    <div className={`p-3 border rounded-lg ${c.container} ${c.border}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-800 text-sm">{label}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.badge}`}>
-              {enabled ? 'ON' : 'OFF'}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5">{description}</p>
-        </div>
-        <button
-          onClick={() => onChange(!enabled)}
-          className={`relative ml-4 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none ${c.bg}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function ArticleAnalyzer() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [metadata, setMetadata] = useState(null);
   const [error, setError] = useState('');
-  const [intensifierEngine, setIntensifierEngine] = useState(true);
+  const [intensifierEngine, setIntensifierEngine] = useState(false);
   const [factiveEngine, setFactiveEngine] = useState(false);
 
   const analyzeArticle = async () => {
@@ -126,7 +82,6 @@ export default function ArticleAnalyzer() {
           <p className="text-slate-600">Analyze articles for metadata and linguistic patterns using AI</p>
         </div>
         <div className="grid lg:grid-cols-2 gap-6">
-          {/* Left Panel */}
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
               <FileText size={24} /> Article Text
@@ -137,15 +92,38 @@ export default function ArticleAnalyzer() {
                   placeholder="Paste your article text here..."
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  className="w-full h-[380px] px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans text-slate-700"
+                  className="w-full h-[400px] px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans text-slate-700"
                 />
-                <div className="mt-4">
+                <div className="mt-4 space-y-2">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Analysis Engines</p>
-                  <div className="space-y-2">
-                    <EngineToggle label="Intensifier Engine" description="Detects adjectives and adverbs that amplify meaning" color="yellow" enabled={intensifierEngine} onChange={setIntensifierEngine} />
-                    <EngineToggle label="Factive Engine" description="Detects verbs that presuppose truth of their statement" color="green" enabled={factiveEngine} onChange={setFactiveEngine} />
-                  </div>
+                  
+                  <label className="flex items-start gap-3 p-3 border border-yellow-200 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={intensifierEngine}
+                      onChange={(e) => setIntensifierEngine(e.target.checked)}
+                      className="mt-1 w-4 h-4 text-yellow-600 border-slate-300 rounded focus:ring-yellow-500"
+                    />
+                    <div className="flex-1">
+                      <span className="font-semibold text-slate-800 text-sm">Intensifier Engine</span>
+                      <p className="text-xs text-slate-600 mt-0.5">Detects adjectives and adverbs that amplify meaning</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-3 p-3 border border-green-200 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={factiveEngine}
+                      onChange={(e) => setFactiveEngine(e.target.checked)}
+                      className="mt-1 w-4 h-4 text-green-600 border-slate-300 rounded focus:ring-green-500"
+                    />
+                    <div className="flex-1">
+                      <span className="font-semibold text-slate-800 text-sm">Factive Engine</span>
+                      <p className="text-xs text-slate-600 mt-0.5">Detects verbs that presuppose truth of their statement</p>
+                    </div>
+                  </label>
                 </div>
+
                 <button onClick={analyzeArticle} disabled={loading || !input.trim()} className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed">
                   {loading ? (<><Loader2 className="animate-spin" size={18} />Analyzing...</>) : (<><Search size={18} />Analyze Article</>)}
                 </button>
@@ -176,7 +154,6 @@ export default function ArticleAnalyzer() {
             )}
           </div>
 
-          {/* Right Panel */}
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2">
               <Search size={24} /> Metadata
@@ -195,7 +172,6 @@ export default function ArticleAnalyzer() {
                 <MetadataItem label="Reading Time" value={metadata.readingTime} />
                 {metadata.url && metadata.url !== 'Unable to locate' && <MetadataItem label="URL" value={metadata.url} />}
 
-                {/* Summary with 5000-char blurb */}
                 <div className="pt-4 border-t border-slate-200">
                   <div className="flex items-baseline justify-between mb-2">
                     <h3 className="font-semibold text-slate-700">Summary</h3>
